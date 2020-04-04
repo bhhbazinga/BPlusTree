@@ -13,10 +13,10 @@
 
 class BPlusTree {
   struct Meta;
-  struct Child;
+  struct Index;
   struct Record;
   struct Node;
-  struct InternalNode;
+  struct IndexNode;
   struct LeafNode;
 
  public:
@@ -40,38 +40,39 @@ class BPlusTree {
   template <typename T>
   T* Map(off_t offset);
   template <typename T>
-  void UnMap(T* map_obj, off_t offset);
+  void UnMap(T* map_obj);
   template <typename T>
   T* Alloc();
   template <typename T>
-  void Dealloc();
+  void Dealloc(T* node);
 
   constexpr size_t GetMinKeys() const;
   constexpr size_t GetMaxKeys() const;
 
   template <typename T>
-  int UpperBound(T arr[], int n, const std::string& target) const;
+  int UpperBound(T arr[], int n, const char* target) const;
   template <typename T>
-  int LowerBound(T arr[], int n, const std::string& target) const;
+  int LowerBound(T arr[], int n, const char* target) const;
 
   LeafNode* SplitLeafNode(LeafNode* leaf_node);
-  InternalNode* SplitInternalNode(InternalNode* internal_node);
-  size_t InsertKeyIntoInternalNode(InternalNode* internal_node,
-                                const std::string& key, off_t of_left,
-                                off_t of_right);
-  size_t InsertKeyIntoLeafNode(LeafNode* leaf_node, const std::string& key,
-                            const std::string& value);
-  off_t GetLeafOffset(const std::string& key);
-  InternalNode* GetOrCreateParent(Node* node);
-  int GetIndexFromLeafNode(LeafNode* leaf_node, const std::string& key);
+  IndexNode* SplitInternalNode(IndexNode* internal_node);
+  size_t InsertKeyIntoInternalNode(IndexNode* internal_node, const char* key,
+                                   off_t of_left, off_t of_right);
+  size_t InsertKeyIntoLeafNode(LeafNode* leaf_node, const char* key,
+                               const char* value);
+  off_t GetLeafOffset(const char* key);
+  IndexNode* GetOrCreateParent(Node* node);
+  int GetIndexFromLeafNode(LeafNode* leaf_node, const char* key);
 
-  size_t DeleteKeyFromLeafNode(LeafNode* leaf_node, const std::string& key);
-  size_t DeleteKeyFromInternalNode(LeafNode* internal_node,
-                                const std::string& key);
+  size_t DeleteKeyFromLeafNode(LeafNode* leaf_node, const char* key,
+                               bool& found);
+  size_t DeleteKeyFromInternalNode(LeafNode* internal_node, const char* key,
+                                   bool& found);
 
-  template <typename T>
-  bool BorrowKeyFromSibling(T* node);
-
+  bool BorrowKeyFromLeafSibling(LeafNode* node);
+  void ReplaceKeyInInternalNode(off_t of_internal, const char* old_key,
+                                const char* new_key);
+  void MergeLeafNode(LeafNode* leaf_node);
   void Dump();
 
   int fd_;

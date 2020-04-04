@@ -11,7 +11,7 @@
 #include <cstring>
 
 const off_t kMetaOffset = 0;
-const int kOrder = 20;
+const int kOrder = 128;
 static_assert(kOrder >= 3,
               "The order of B+Tree should be greater than or equal to 3.");
 const int kMaxKeySize = 32;
@@ -20,36 +20,36 @@ typedef char Key[kMaxKeySize];
 typedef char Value[kMaxValueSize];
 
 struct BPlusTree::Meta {
-  size_t height;
-  size_t size;
-  off_t root;
-  off_t next_block;
+  size_t self;    // ofset of self
+  size_t height;  // height of B+Tree
+  size_t size;    // key size
+  off_t root;     // offset of root
+  off_t block;    // offset of next new node
 };
 
-struct BPlusTree::Child {
-  Child() : offset(0) { std::memset(key, 0, sizeof(key)); }
+struct BPlusTree::Index {
+  Index() : offset(0) { std::memset(key, 0, sizeof(key)); }
 
   off_t offset;
   Key key;
 
-  void Assign(off_t of, const std::string& k) {
+  void Assign(off_t of, const char* k) {
     offset = of;
-    strncpy(key, k.data(), kMaxKeySize);
+    strncpy(key, k, kMaxKeySize);
   }
+  void UpdateKey(const char* k) { strncpy(key, k, kMaxKeySize); }
 };
 
 struct BPlusTree::Record {
   Key key;
   Value value;
 
-  void Assign(const std::string& k, const std::string& v) {
-    strncpy(key, k.data(), kMaxKeySize);
-    strncpy(value, v.data(), kMaxValueSize);
+  void Assign(const char* k, const char* v) {
+    strncpy(key, k, kMaxKeySize);
+    strncpy(value, v, kMaxValueSize);
   }
-
-  void UpdateValue(const std::string& v) {
-    strncpy(value, v.data(), kMaxValueSize);
-  }
+  void UpdateKey(const char* k) { strncpy(key, k, kMaxKeySize); }
+  void UpdateValue(const char* v) { strncpy(value, v, kMaxValueSize); }
 };
 
 struct BPlusTree::Node {
@@ -60,26 +60,26 @@ struct BPlusTree::Node {
 
   off_t self;    // offset of self
   off_t parent;  // offset of parent
-  off_t left;    // leaf sibling.
-  off_t right;   // right sibling.
-  size_t count;  // child count or record count.
+  off_t left;    // offset of left node(may be sibling)
+  off_t right;   // offset of right node(may be sibling)
+  size_t count;  // child count or record count
 };
 
-struct BPlusTree::InternalNode : BPlusTree::Node {
-  InternalNode() = default;
-  ~InternalNode() = default;
+struct BPlusTree::IndexNode : BPlusTree::Node {
+  IndexNode() = default;
+  ~IndexNode() = default;
 
   size_t AssertCount() {
     size_t cnt = 0;
     for (size_t i = 0; i < count; ++i) {
-      if (strcmp(childs[i].key, "") != 0) {
+      if (std::strcmp(indexes[i].key, "") != 0) {
         ++cnt;
       }
     }
     return cnt;
   }
 
-  Child childs[kOrder + 1];
+  Index indexes[kOrder + 1];
 };
 
 struct BPlusTree::LeafNode : BPlusTree::Node {
@@ -99,32 +99,58 @@ struct BPlusTree::LeafNode : BPlusTree::Node {
   BPlusTree::Record records[kOrder];
 };
 
+BPlusTree::BPlusTree(const char* path)
+    : fd_(open(path, O_CREAT | O_RDWR, 0600)) {
+  if (fd_ == -1) {
+    Exit("open");
+  }
+  meta_ = Map<Meta>(kMetaOffset);
+  if (meta_->height == 0) {
+    // Initialize B+tree;
+    constexpr off_t of_root = kMetaOffset + sizeof(Meta);
+    LeafNode* root = new (Map<LeafNode>(of_root)) LeafNode();
+    root->self = of_root;
+    meta_->height = 1;
+    meta_->root = of_root;
+    meta_->block = of_root + sizeof(LeafNode);
+    // log("meta_->next_block=%d,meta_->root=%d,\n", meta_->next_block,
+    //     meta_->root);
+    UnMap<LeafNode>(root);
+  }
+}
+
+BPlusTree::~BPlusTree() {
+  UnMap(meta_);
+  close(fd_);
+}
+
 void BPlusTree::Put(const std::string& key, const std::string& value) {
   // log("Put:key=%s,value=%s\n", key.data(), value.data());
   // 1. Find Leaf node.
-  off_t of_leaf = GetLeafOffset(key);
+  off_t of_leaf = GetLeafOffset(key.data());
   LeafNode* leaf_node = Map<LeafNode>(of_leaf);
-  if (InsertKeyIntoLeafNode(leaf_node, key, value) <= GetMaxKeys()) {
+  if (InsertKeyIntoLeafNode(leaf_node, key.data(), value.data()) <=
+      GetMaxKeys()) {
     // 2.If records of leaf node less than or equals kOrder - 1 then finish.
-    UnMap<LeafNode>(leaf_node, of_leaf);
+    UnMap<LeafNode>(leaf_node);
     return;
   }
 
   // 3. Split leaf node to two leaf nodes.
   LeafNode* split_node = SplitLeafNode(leaf_node);
-  std::string mid_key = split_node->records[0].key;
-  InternalNode* parent_node = GetOrCreateParent(leaf_node);
+  const char* mid_key = split_node->records[0].key;
+  IndexNode* parent_node = GetOrCreateParent(leaf_node);
   off_t of_parent = leaf_node->parent;
   off_t of_split = leaf_node->right;
   split_node->parent = of_parent;
-  UnMap<LeafNode>(leaf_node, of_leaf);
-  UnMap<LeafNode>(split_node, of_split);
 
   // 4.Insert key to parent of splited leaf nodes and
   // link two splited left nodes to parent.
   if (InsertKeyIntoInternalNode(parent_node, mid_key, of_leaf, of_split) <=
       GetMaxKeys()) {
-    UnMap<InternalNode>(parent_node, of_parent);
+    UnMap<LeafNode>(leaf_node);
+    UnMap<LeafNode>(split_node);
+    UnMap<IndexNode>(parent_node);
     return;
   }
 
@@ -132,76 +158,62 @@ void BPlusTree::Put(const std::string& key, const std::string& value) {
   // until count <= kOrder - 1.
   size_t count;
   do {
-    InternalNode* old_parent_node = parent_node;
+    IndexNode* old_parent_node = parent_node;
     off_t old_of_parent = of_parent;
-    InternalNode* split_node = SplitInternalNode(old_parent_node);
-    std::string mid_key = old_parent_node->childs[old_parent_node->count].key;
+    IndexNode* split_node = SplitInternalNode(old_parent_node);
+    const char* mid_key = old_parent_node->indexes[old_parent_node->count].key;
     parent_node = GetOrCreateParent(old_parent_node);
     of_parent = old_parent_node->parent;
     of_split = old_parent_node->right;
     split_node->parent = of_parent;
     count = InsertKeyIntoInternalNode(parent_node, mid_key, old_of_parent,
                                       of_split);
-    UnMap<InternalNode>(old_parent_node, old_of_parent);
+    UnMap<IndexNode>(old_parent_node);
   } while (count > GetMaxKeys());
-  UnMap<InternalNode>(parent_node, of_parent);
+  UnMap<IndexNode>(parent_node);
 }
 
 bool BPlusTree::Delete(const std::string& key) {
-  off_t of_leaf = GetLeafOffset(key);
+  off_t of_leaf = GetLeafOffset(key.data());
   LeafNode* leaf_node = Map<LeafNode>(of_leaf);
-  size_t count = DeleteKeyFromLeafNode(leaf_node, key);
-  if (count == 0) {
-    // Not found.
-    UnMap<LeafNode>(leaf_node, of_leaf);
+  bool found;
+  size_t count = DeleteKeyFromLeafNode(leaf_node, key.data(), found);
+  if (!found) {
+    UnMap<LeafNode>(leaf_node);
     return false;
   }
+
+  // do {
+  //   if (count >= GetMinKeys()) break;
+  //   if (BorrowKeyFromLeafSibling(leaf_node)) break;
+  // } while (0);
+  // UnMap<LeafNode>(leaf_node);
+  // return true;
+
   if (count >= GetMinKeys()) {
-    UnMap<LeafNode>(leaf_node, of_leaf);
+    UnMap<LeafNode>(leaf_node);
     return true;
   }
+  if (BorrowKeyFromLeafSibling(leaf_node)) {
+    UnMap<LeafNode>(leaf_node);
+    return true;
+  }
+  MergeLeafNode(leaf_node);
 
-  // // Borrow key from left sibling.
-  // off_t of_sibling = leaf_node->left;
-  // if (of_sibling != 0) {
-  //   LeafNode* sibling = Map<LeafNode>(of_sibling);
-  //   if (sibling->parent == leaf_node->parent && sibling->count >
-  //   GetMinKeys()) {
-  //     UnMap<LeafNode>(leaf_node, of_leaf);
-  //     UnMap<LeafNode>(sibling, of_sibling);
-  //     return true;
-  //   }
-  // }
-
-  // // Borrow key from right sibling.
-  // of_sibling = leaf_node->right;
-  // if (of_sibling != 0) {
-  //   LeafNode* sibling = Map<LeafNode>(of_sibling);
-  //   if (sibling->parent == leaf_node->parent && sibling->count >
-  //   GetMinKeys()) {
-  //     UnMap<LeafNode>(leaf_node, of_leaf);
-  //     UnMap<LeafNode>(sibling, of_sibling);
-  //     return true;
-  //   }
-  // }
-
-  // left
-
-  // right
-
+  UnMap<LeafNode>(leaf_node);
   return true;
 }
 
 bool BPlusTree::Get(const std::string& key, std::string& value) {
-  off_t of_leaf = GetLeafOffset(key);
+  off_t of_leaf = GetLeafOffset(key.data());
   LeafNode* leaf_node = Map<LeafNode>(of_leaf);
-  int index = GetIndexFromLeafNode(leaf_node, key);
+  int index = GetIndexFromLeafNode(leaf_node, key.data());
   if (index == -1) {
-    UnMap<LeafNode>(leaf_node, of_leaf);
+    UnMap<LeafNode>(leaf_node);
     return false;
   }
   value = leaf_node->records[index].value;
-  UnMap<LeafNode>(leaf_node, of_leaf);
+  UnMap<LeafNode>(leaf_node);
   return true;
 }
 
@@ -226,10 +238,10 @@ T* BPlusTree::Map(off_t offset) {
 }
 
 template <typename T>
-void BPlusTree::UnMap(T* map_obj, off_t offset) {
-  off_t page_offset = offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+void BPlusTree::UnMap(T* map_obj) {
+  off_t page_offset = map_obj->self & ~(sysconf(_SC_PAGE_SIZE) - 1);
   char* start = reinterpret_cast<char*>(map_obj);
-  void* addr = static_cast<void*>(&start[page_offset - offset]);
+  void* addr = static_cast<void*>(&start[page_offset - map_obj->self]);
   // log("munmap:addr=%p\n", addr);
   if (munmap(addr, sizeof(T)) != 0) Exit("munmap");
 }
@@ -238,28 +250,28 @@ constexpr size_t BPlusTree::GetMinKeys() const { return (kOrder + 1) / 2 - 1; }
 
 constexpr size_t BPlusTree::GetMaxKeys() const { return kOrder - 1; }
 
-BPlusTree::InternalNode* BPlusTree::GetOrCreateParent(Node* node) {
+BPlusTree::IndexNode* BPlusTree::GetOrCreateParent(Node* node) {
   if (node->parent == 0) {
     // Split root node.
-    InternalNode* parent_node = Alloc<InternalNode>();
+    IndexNode* parent_node = Alloc<IndexNode>();
     node->parent = parent_node->self;
     meta_->root = parent_node->self;
     ++meta_->height;
     // log("meta_->root=%d,meta_->height=%d\n", meta_->root, meta_->height);
     return parent_node;
   }
-  return Map<InternalNode>(node->parent);
+  return Map<IndexNode>(node->parent);
 }
 
 template <typename T>
-int BPlusTree::UpperBound(T arr[], int n, const std::string& target) const {
+int BPlusTree::UpperBound(T arr[], int n, const char* key) const {
   // assert(n <= GetMaxKeys());
   int l = 0, r = n - 1;
   // log("target=%s,mid=%d\n", target.data(), mid);
   // log("l=%d,r=%d\n", l, r);
   while (l <= r) {
     int mid = (l + r) >> 1;
-    if (arr[mid].key <= target) {
+    if (std::strncmp(arr[mid].key, key, kMaxKeySize) <= 0) {
       l = mid + 1;
     } else {
       r = mid - 1;
@@ -269,14 +281,14 @@ int BPlusTree::UpperBound(T arr[], int n, const std::string& target) const {
 }
 
 template <typename T>
-int BPlusTree::LowerBound(T arr[], int n, const std::string& target) const {
+int BPlusTree::LowerBound(T arr[], int n, const char* key) const {
   // assert(n <= GetMaxKeys());
   int l = 0, r = n - 1;
   // log("target=%s,mid=%d\n", target.data(), mid);
   // log("l=%d,r=%d\n", l, r);
   while (l <= r) {
     int mid = (l + r) >> 1;
-    if (arr[mid].key < target) {
+    if (std::strncmp(arr[mid].key, key, kMaxKeySize) < 0) {
       l = mid + 1;
     } else {
       r = mid - 1;
@@ -288,51 +300,50 @@ int BPlusTree::LowerBound(T arr[], int n, const std::string& target) const {
 template <typename T>
 T* BPlusTree::Alloc() {
   // log("meta_->next_block=%d\n", meta_->next_block);
-  T* node = new (Map<T>(meta_->next_block)) T();
-  node->self = meta_->next_block;
-  meta_->next_block += sizeof(T);
+  T* node = new (Map<T>(meta_->block)) T();
+  node->self = meta_->block;
+  meta_->block += sizeof(T);
   return node;
 }
 
 template <typename T>
-void BPlusTree::Dealloc() {}
+void BPlusTree::Dealloc(T* node) {
+  UnMap<T>(node);
+}
 
-off_t BPlusTree::GetLeafOffset(const std::string& key) {
+off_t BPlusTree::GetLeafOffset(const char* key) {
   size_t height = meta_->height;
   off_t offset = meta_->root;
   if (height == 1) return offset;
 
   // 1. Find bottom internal node.
-  InternalNode* inter_node = Map<InternalNode>(offset);
+  IndexNode* inter_node = Map<IndexNode>(offset);
   while (--height > 1) {
-    int index = UpperBound(inter_node->childs, inter_node->count, key);
-    off_t of_child = inter_node->childs[index].offset;
-    UnMap<InternalNode>(inter_node, offset);
-    inter_node = Map<InternalNode>(of_child);
+    int index = UpperBound(inter_node->indexes, inter_node->count, key);
+    off_t of_child = inter_node->indexes[index].offset;
+    UnMap(inter_node);
+    inter_node = Map<IndexNode>(of_child);
     offset = of_child;
   }
   // 2. Get offset of leaf node.
-  int index = UpperBound(inter_node->childs, inter_node->count, key);
-  off_t of_child = inter_node->childs[index].offset;
-  UnMap<InternalNode>(inter_node, offset);
+  int index = UpperBound(inter_node->indexes, inter_node->count, key);
+  off_t of_child = inter_node->indexes[index].offset;
+  UnMap<IndexNode>(inter_node);
   return of_child;
 }
 
-size_t BPlusTree::InsertKeyIntoInternalNode(InternalNode* internal_node,
-                                         const std::string& key, off_t of_left,
-                                         off_t of_right) {
-  size_t& count = internal_node->count;
+size_t BPlusTree::InsertKeyIntoInternalNode(IndexNode* internal_node,
+                                            const char* key, off_t of_left,
+                                            off_t of_right) {
   // assert(internal_node->AssertCount() == count);
   // assert(count <= GetMaxKeys());
-
-  Child* childs = internal_node->childs;
-  int index = UpperBound(childs, count, key);
-  std::memmove(&childs[index + 1], &childs[index],
-               sizeof(childs[0]) * (count - index + 1));
+  int index = UpperBound(internal_node->indexes, internal_node->count, key);
+  std::memmove(
+      &internal_node->indexes[index + 1], &internal_node->indexes[index],
+      sizeof(internal_node->indexes[0]) * (internal_node->count - index + 1));
   // log("index=%d,of_left=%d, key=%s\n", index, of_left, key.data());
-  childs[index].Assign(of_left, key);
-  childs[index + 1].offset = of_right;
-  ++count;
+  internal_node->indexes[index].Assign(of_left, key);
+  internal_node->indexes[index + 1].offset = of_right;
   // assert(internal_node->AssertCount() == count);
   // if (internal_node->AssertCount() != count) {
   //   for (int i = 0; i < count; ++i) {
@@ -340,51 +351,46 @@ size_t BPlusTree::InsertKeyIntoInternalNode(InternalNode* internal_node,
   //   }
   //   log("%s", "\n");
   // }
-
-  return count;
+  return ++internal_node->count;
 }
 
-size_t BPlusTree::InsertKeyIntoLeafNode(LeafNode* leaf_node,
-                                     const std::string& key,
-                                     const std::string& value) {
-  size_t& count = leaf_node->count;
+size_t BPlusTree::InsertKeyIntoLeafNode(LeafNode* leaf_node, const char* key,
+                                        const char* value) {
   // assert(count <= GetMaxKeys());
   // assert(leaf_node->AssertCount() == count);
-
-  Record* records = leaf_node->records;
-  int index = UpperBound(records, count, key);
-  if (index > 0 && records[index - 1].key == key) {
+  int index = UpperBound(leaf_node->records, leaf_node->count, key);
+  if (index > 0 &&
+      std::strncmp(leaf_node->records[index - 1].key, key, kMaxKeySize) == 0) {
     // log("index=%d,value=%s\n", index, value.data());
-    records[index - 1].UpdateValue(value);
-    return count;
+    leaf_node->records[index - 1].UpdateValue(value);
+    return leaf_node->count;
   }
-  std::memmove(&records[index + 1], &records[index],
-               sizeof(records[0]) * (count - index));
-  records[index].Assign(key, value);
-  ++count;
+  std::memmove(&leaf_node->records[index + 1], &leaf_node->records[index],
+               sizeof(leaf_node->records[0]) * (leaf_node->count - index));
+  leaf_node->records[index].Assign(key, value);
   // assert(leaf_node->AssertCount() == count);
-  return count;
+  return ++leaf_node->count;
 }
 
-BPlusTree::InternalNode* BPlusTree::SplitInternalNode(
-    InternalNode* internal_node) {
+BPlusTree::IndexNode* BPlusTree::SplitInternalNode(
+    IndexNode* internal_node) {
   // assert(internal_node->count == kOrder);
   // assert(internal_node->AssertCount() == internal_node->count);
   constexpr int mid = (kOrder - 1) >> 1;
   constexpr int left_count = mid;
   constexpr int right_count = kOrder - mid - 1;
-  InternalNode* split_node = Alloc<InternalNode>();
+  IndexNode* split_node = Alloc<IndexNode>();
   split_node->count = right_count;
   split_node->left = internal_node->self;
   split_node->right = 0;
-  std::memcpy(&split_node->childs[0], &internal_node->childs[mid + 1],
-              (right_count + 1) * sizeof(split_node->childs[0]));
+  std::memcpy(&split_node->indexes[0], &internal_node->indexes[mid + 1],
+              (right_count + 1) * sizeof(split_node->indexes[0]));
   for (int i = mid + 1; i <= kOrder; ++i) {
     // Link old childs to new splited parent.
-    off_t of_child = internal_node->childs[i].offset;
+    off_t of_child = internal_node->indexes[i].offset;
     LeafNode* child_node = Map<LeafNode>(of_child);
     child_node->parent = split_node->self;
-    UnMap<LeafNode>(child_node, of_child);
+    UnMap<LeafNode>(child_node);
   }
   internal_node->count = left_count;
   internal_node->right = split_node->self;
@@ -416,16 +422,13 @@ BPlusTree::LeafNode* BPlusTree::SplitLeafNode(LeafNode* leaf_node) {
   return split_node;
 }
 
-int BPlusTree::GetIndexFromLeafNode(LeafNode* leaf_node,
-                                    const std::string& key) {
-  Record* records = leaf_node->records;
-  int count = leaf_node->count;
-  int index = LowerBound(records, count, key);
-  return index < count && records[index].key == key ? index : -1;
+int BPlusTree::GetIndexFromLeafNode(LeafNode* leaf_node, const char* key) {
+  int index = LowerBound(leaf_node->records, leaf_node->count, key);
+  return index < leaf_node->count && std::strncmp(leaf_node->records[index].key,
+                                                  key, kMaxKeySize) == 0
+             ? index
+             : -1;
 }
-
-template <typename T>
-bool BPlusTree::BorrowKeyFromSibling(T* node) {}
 
 // std::vector<std::string> BPlusTree::GetRange(const std::string& left_key,
 //                                              const std::string& right_key) {
@@ -454,39 +457,86 @@ void BPlusTree::Dump() {
   // }
 }
 
-size_t BPlusTree::DeleteKeyFromLeafNode(LeafNode* leaf_node,
-                                     const std::string& key) {
+size_t BPlusTree::DeleteKeyFromLeafNode(LeafNode* leaf_node, const char* key,
+                                        bool& found) {
   int index = GetIndexFromLeafNode(leaf_node, key);
-  if (index == -1)  return 0;
+  if (index == -1) {
+    found = false;
+    return 0;
+  }
 
-  return 0;
+  found = true;
+  memmove(&leaf_node->records[index], &leaf_node->records[index + 1],
+          sizeof(leaf_node->records[0]) * (leaf_node->count - index - 1));
+  return --leaf_node->count;
 }
 
 size_t BPlusTree::DeleteKeyFromInternalNode(LeafNode* internal_node,
-                                         const std::string& key) {
+                                            const char* key, bool& found) {
   return 0;
 }
 
-BPlusTree::BPlusTree(const char* path)
-    : fd_(open(path, O_CREAT | O_RDWR, 0600)) {
-  if (fd_ == -1) {
-    Exit("open");
+bool BPlusTree::BorrowKeyFromLeafSibling(LeafNode* leaf_node) {
+  // Borrow key from left sibling.
+  if (leaf_node->left != 0) {
+    LeafNode* sibling = Map<LeafNode>(leaf_node->left);
+    if (sibling->parent == leaf_node->parent && sibling->count > GetMinKeys()) {
+      // Borrow rightmost key from left sibling.
+      const char* borrow_key = sibling->records[--sibling->count].key;
+      std::memmove(&leaf_node->records[1], &leaf_node->records[0],
+                   sizeof(leaf_node->records[0]) * leaf_node->count++);
+      leaf_node->records[0].UpdateKey(borrow_key);
+      // Replace parent's key with borrow key.
+      ReplaceKeyInInternalNode(leaf_node->parent, leaf_node->records[1].key,
+                               borrow_key);
+      UnMap<LeafNode>(sibling);
+      return true;
+    }
+  } else {
+    assert(leaf_node->right != 0);
+    // Borrow key from right sibling.
+    LeafNode* sibling = Map<LeafNode>(leaf_node->right);
+    if (sibling->parent == leaf_node->parent && sibling->count > GetMinKeys()) {
+      // Borrow leftmost key from right sibling.
+      const char* borrow_key = sibling->records[0].key;
+      std::memmove(&sibling->records[0], &sibling->records[1],
+                   sizeof(sibling->records[0]) * (--sibling->count));
+      leaf_node->records[leaf_node->count++].UpdateKey(borrow_key);
+      // Replace parent's key with borrow key.
+      ReplaceKeyInInternalNode(leaf_node->parent, borrow_key,
+                               sibling->records[0].key);
+      UnMap<LeafNode>(sibling);
+      return true;
+    }
   }
-  meta_ = Map<Meta>(kMetaOffset);
-  if (meta_->height == 0) {
-    // Initialize B+tree;
-    constexpr off_t of_root = kMetaOffset + sizeof(Meta);
-    LeafNode* root = new (Map<LeafNode>(of_root)) LeafNode();
-    UnMap<LeafNode>(root, of_root);
-    meta_->height = 1;
-    meta_->root = of_root;
-    meta_->next_block = of_root + sizeof(LeafNode);
-    // log("meta_->next_block=%d,meta_->root=%d,\n", meta_->next_block,
-    //     meta_->root);
-  }
+  return false;
 }
 
-BPlusTree::~BPlusTree() {
-  UnMap<Meta>(meta_, kMetaOffset);
-  close(fd_);
+void BPlusTree::ReplaceKeyInInternalNode(off_t of_internal, const char* old_key,
+                                         const char* new_key) {
+  IndexNode* internal_node = Map<IndexNode>(of_internal);
+  int index = LowerBound(internal_node->indexes, internal_node->count, old_key);
+  assert(index < internal_node->count &&
+         std::strncmp(internal_node->indexes[index].key, old_key, kMaxKeySize) ==
+             0);
+  internal_node->indexes[index].UpdateKey(new_key);
+  UnMap<IndexNode>(internal_node);
+}
+
+void BPlusTree::MergeLeafNode(LeafNode* leaf_node) {
+  LeafNode* merge_node = Alloc<LeafNode>();
+  LeafNode* sibling;
+  bool merge_left = leaf_node->left != 0;
+  sibling = merge_left ? Map<LeafNode>(leaf_node->left)
+                       : Map<LeafNode>(leaf_node->right);
+  assert(sibling->count <= GetMinKeys() && leaf_node->count <= GetMinKeys());
+  std::memcpy(&leaf_node->records[leaf_node->count], &sibling->records[0],
+              sibling->count);
+  leaf_node->count += sibling->count;
+  if (merge_left) {
+    leaf_node->left = sibling->left;
+  } else {
+    leaf_node->right = sibling->right;
+  }
+  Dealloc(sibling);
 }
