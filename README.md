@@ -1,2 +1,2 @@
 # BPlusTree
-A simple KV store program base on b+ tree.
+A simple KV store base on B+Tree.
