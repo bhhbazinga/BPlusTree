@@ -18,6 +18,14 @@ int main(int argc, char const* argv[]) {
     snprintf(k, 32, "k%d", rand() % 100000);
     snprintf(v, 32, "v%d", rand() % 100000);
     bpt.Put(k, v);
+
+    std::string test;
+    assert(bpt.Get(k, test));
+    assert(test == v);
   }
+
+  std::string test;
+  assert(!bpt.Get("asd2", test));
+
   return 0;
 }

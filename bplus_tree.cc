@@ -1,4 +1,3 @@
-
 #include "bplus_tree.h"
 
 #include <fcntl.h>
@@ -11,7 +10,10 @@
 #include <cassert>
 #include <cstring>
 
-const int kOrder = 4;
+const int kOrder = 20;
+static_assert(kOrder >= 3,
+              "The order of B+Tree should be greater than or equal to 3.");
+
 const int kMaxKeySize = 32;
 const int kMaxValueSize = 256;
 typedef char Key[kMaxKeySize];
@@ -63,8 +65,7 @@ struct BPlusTree::Node {
   off_t right;   // right sibling.
   size_t count;  // child count or record count.
 };
-#include <execinfo.h>
-#include <signal.h>
+
 struct BPlusTree::InternalNode : BPlusTree::Node {
   InternalNode() = default;
   ~InternalNode() = default;
@@ -150,7 +151,7 @@ int BPlusTree::UpperBound(T arr[], int n, const std::string& target) const {
   // log("l=%d,r=%d\n", l, r);
   while (l <= r) {
     int mid = (l + r) >> 1;
-    if (target >= arr[mid].key) {
+    if (arr[mid].key <= target) {
       l = mid + 1;
     } else {
       r = mid - 1;
@@ -158,6 +159,23 @@ int BPlusTree::UpperBound(T arr[], int n, const std::string& target) const {
   }
   return l;
 }
+
+template <typename T>
+int BPlusTree::LowerBound(T arr[], int n, const std::string& target) const {
+  assert(n <= kOrder - 1);
+  int l = 0, r = n - 1;
+  // log("target=%s,mid=%d\n", target.data(), mid);
+  // log("l=%d,r=%d\n", l, r);
+  while (l <= r) {
+    int mid = (l + r) >> 1;
+    if (arr[mid].key < target) {
+      l = mid + 1;
+    } else {
+      r = mid - 1;
+    }
+  }
+  return l;
+};
 
 template <typename T>
 T* BPlusTree::Alloc(off_t& offset) {
@@ -192,7 +210,7 @@ off_t BPlusTree::GetLeafOffset(const std::string& key) {
   return of_child;
 }
 
-int BPlusTree::InsertInternalNode(InternalNode* internal_node,
+int BPlusTree::InsertKeyIntoInternalNode(InternalNode* internal_node,
                                   const std::string& key, off_t of_left,
                                   off_t of_right) {
   size_t& count = internal_node->count;
@@ -218,7 +236,7 @@ int BPlusTree::InsertInternalNode(InternalNode* internal_node,
   return count;
 }
 
-int BPlusTree::InsertLeafNode(LeafNode* leaf_node, const std::string& key,
+int BPlusTree::InsertKeyIntoLeafNode(LeafNode* leaf_node, const std::string& key,
                               const std::string& value) {
   size_t& count = leaf_node->count;
   assert(count <= kOrder - 1);
@@ -292,20 +310,12 @@ BPlusTree::LeafNode* BPlusTree::SplitLeafNode(LeafNode* leaf_node,
   return split_node;
 }
 
-bool BPlusTree::Get(const std::string& key, std::string& value) {
-  return false;
-}
-
-// std::vector<std::string> BPlusTree::GetRange(const std::string& left,
-//                                              const std::string& right) {
-// }
-
 void BPlusTree::Put(const std::string& key, const std::string& value) {
   // log("Put:key=%s,value=%s\n", key.data(), value.data());
   // 1. Find Leaf node.
   off_t of_leaf = GetLeafOffset(key);
   LeafNode* leaf_node = Map<LeafNode>(of_leaf);
-  if (InsertLeafNode(leaf_node, key, value) <= kOrder - 1) {
+  if (InsertKeyIntoLeafNode(leaf_node, key, value) <= kOrder - 1) {
     // 2.If records of leaf node less than or equals kOrder - 1 then finish.
     UnMap<LeafNode>(leaf_node, of_leaf);
     return;
@@ -323,7 +333,7 @@ void BPlusTree::Put(const std::string& key, const std::string& value) {
 
   // 4.Insert key to parent of splited leaf nodes and
   // link two splited left nodes to parent.
-  if (InsertInternalNode(parent_node, mid_key, of_leaf, of_split) <=
+  if (InsertKeyIntoInternalNode(parent_node, mid_key, of_leaf, of_split) <=
       kOrder - 1) {
     UnMap<InternalNode>(parent_node, of_parent);
     return;
@@ -342,11 +352,51 @@ void BPlusTree::Put(const std::string& key, const std::string& value) {
     of_parent = old_parent_node->parent;
     of_split = old_parent_node->right;
     split_node->parent = of_parent;
-    count = InsertInternalNode(parent_node, mid_key, old_of_parent, of_split);
+    count = InsertKeyIntoInternalNode(parent_node, mid_key, old_of_parent, of_split);
     UnMap<InternalNode>(old_parent_node, old_of_parent);
   } while (count > kOrder - 1);
   UnMap<InternalNode>(parent_node, of_parent);
 }
+
+bool BPlusTree::Delete(const std::string& key) {
+  off_t of_leaf = GetLeafOffset(key);
+  LeafNode* leaf_node = Map<LeafNode>(of_leaf);
+  int index = GetIndexInLeafNode(leaf_node, key);
+  if (index == -1) {
+    UnMap<LeafNode>(leaf_node, of_leaf);
+    return false;
+  }
+  return true;
+}
+
+int BPlusTree::GetIndexInLeafNode(LeafNode* leaf_node, const std::string& key) {
+  Record* records = leaf_node->records;
+  int count = leaf_node->count;
+  int index = LowerBound(records, count, key);
+  return index < count && records[index].key == key ? index : -1;
+}
+
+bool BPlusTree::Get(const std::string& key, std::string& value) {
+  off_t of_leaf = GetLeafOffset(key);
+  LeafNode* leaf_node = Map<LeafNode>(of_leaf);
+  int index = GetIndexInLeafNode(leaf_node, key);
+  if (index == -1) {
+    UnMap<LeafNode>(leaf_node, of_leaf);
+    return false;
+  }
+  value = leaf_node->records[index].value;
+  UnMap<LeafNode>(leaf_node, of_leaf);
+  return true;
+}
+
+// std::vector<std::string> BPlusTree::GetRange(const std::string& left_key,
+//                                              const std::string& right_key) {
+//   off_t of_leaf = GetLeafOffset(left_key);
+//   off_t of_leaf = GetLeafOffset(left_key);
+//   std::vector<std::string> res;
+//   res.push_back("aaa");
+//   return res;
+// }
 
 inline bool BPlusTree::Empty() const { return get_size() == 0; }
 

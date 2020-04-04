@@ -24,8 +24,8 @@ class BPlusTree {
   ~BPlusTree();
 
   bool Get(const std::string& key, std::string& value);
-  // std::vector<std::string> GetRange(const std::string& left,
-  //                                   const std::string& right);
+  std::vector<std::string> GetRange(const std::string& left,
+                                    const std::string& right);
   void Put(const std::string& key, const std::string& value);
   bool Delete(const std::string& key);
   bool Empty() const;
@@ -44,21 +44,26 @@ class BPlusTree {
   template <typename T>
   int UpperBound(T arr[], int n, const std::string& target) const;
   template <typename T>
+  int LowerBound(T arr[], int n, const std::string& target) const;
+  template <typename T>
   T* Alloc(off_t& offset);
   template <typename T>
   void Dealloc();
 
   off_t GetLeafOffset(const std::string& key);
 
-  int InsertInternalNode(InternalNode* internal_node, const std::string& key,
+  int InsertKeyIntoInternalNode(InternalNode* internal_node, const std::string& key,
                          off_t of_left, off_t of_right);
-  int InsertLeafNode(LeafNode* leaf_node, const std::string& key,
+  int InsertKeyIntoLeafNode(LeafNode* leaf_node, const std::string& key,
                      const std::string& value);
 
   LeafNode* SplitLeafNode(LeafNode* leaf_node, off_t of_leaf);
-  InternalNode* SplitInternalNode(InternalNode* internal_node, off_t of_internal);
+  InternalNode* SplitInternalNode(InternalNode* internal_node,
+                                  off_t of_internal);
 
   InternalNode* GetOrCreateParent(Node* node);
+
+  int GetIndexInLeafNode(LeafNode* leaf_node, const std::string& key);
 
   void Dump();
 
