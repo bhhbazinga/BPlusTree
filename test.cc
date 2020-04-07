@@ -12,35 +12,35 @@ int main(int argc, char const* argv[]) {
 
   BPlusTree bpt("test.db");
   bpt.Put("1", "1");
-  bpt.Put("2", "2");
-  bpt.Put("3", "3");
-  bpt.Put("4", "4");
-  bpt.Put("5", "5");
+  bpt.Put("8", "8");
   bpt.Put("6", "6");
   bpt.Put("7", "7");
-  bpt.Put("8", "8");
+  bpt.Put("2", "2");
 
-  // bpt.Delete("1");
-  // bpt.Delete("2");
-  // bpt.Delete("3");
-  // bpt.Delete("4");
-  // bpt.Delete("5");
-  // bpt.Delete("6");
-  // bpt.Delete("7");
-  // bpt.Delete("8");
-
-  bpt.Delete("8");
-  bpt.Delete("7");
-  bpt.Delete("6");
-  bpt.Delete("5");
-  bpt.Delete("4");
-  bpt.Delete("3");
-  bpt.Delete("2");
   bpt.Delete("1");
+  bpt.Delete("7");
+  bpt.Delete("2");
+  bpt.Delete("8");
 
-  // bpt.Put("1", "1");
+  // for (;;) {
+  //   log("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~%s", "\n\n");
+  //   BPlusTree bpt("test.db");
+  //   srand(time(0));
+  //   int n = 8;
+  //   for (int i = 1; i <= n; ++i) {
+  //     char k[32];
+  //     snprintf(k, 32, "%d", rand() % n + 1);
+  //     bpt.Put(k, k);
+  //   }
+  //   for (int i = 1; i <= n; ++i) {
+  //     char k[32];
+  //     snprintf(k, 32, "%d", rand() % n + 1);
+  //     bpt.Delete(k);
+  //   }
+  //   remove("test.db");
+  // }
 
-  // for (int i = 0; i < 1000; ++i) {
+  // for (int i = 0; i < 100; ++i) {
   //   char k[32];
   //   char v[32];
   //   snprintf(k, 32, "k%d", i);
@@ -52,7 +52,7 @@ int main(int argc, char const* argv[]) {
   //   assert(test == v);
   // }
 
-  // for (int i = 0; i < 1000; ++i) {
+  // for (int i = 0; i < 100; ++i) {
   //   char k[32];
   //   snprintf(k, 32, "k%d", i);
   //   bpt.Delete(k);
