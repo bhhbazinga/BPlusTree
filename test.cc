@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 
 #include "bplus_tree.h"
@@ -10,53 +11,50 @@ int main(int argc, char const* argv[]) {
   (void)argc;
   (void)argv;
 
+  srand(time(0));
   BPlusTree bpt("test.db");
-  bpt.Put("1", "1");
-  bpt.Put("8", "8");
-  bpt.Put("6", "6");
-  bpt.Put("7", "7");
-  bpt.Put("2", "2");
+  char k[33];
+  char v[101];
+  for (int n = 1000; n <= 100000; n *= 10) {
+    std::cout << "----------------------------------------------------" << "\n";
+    auto t1 = std::chrono::steady_clock::now();
+    // Random Insert
+    for (int i = 0; i < n; ++i) {
+      int r = rand() % n;
+      snprintf(k, 33, "k%d", r);
+      snprintf(v, 101, "v%d", r);
+      bpt.Put(k, v);
+    }
+    auto t2 = std::chrono::steady_clock::now();
+    std::cout << "Random Insert " << n << " items: time span="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1)
+                     .count() << "ms"
+              << "\n";
 
-  bpt.Delete("1");
-  bpt.Delete("7");
-  bpt.Delete("2");
-  bpt.Delete("8");
+    // Random Find
+    for (int i = 0; i < n; ++i) {
+      int r = rand() % n;
+      snprintf(k, 33, "k%d", i);
+      std::string value;
+      bpt.Get(k, value);
+    }
+    auto t3 = std::chrono::steady_clock::now();
+    std::cout << "Random Get " << n << " items: time span="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2)
+                     .count() << "ms"
+              << "\n";
 
-  // for (;;) {
-  //   log("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~%s", "\n\n");
-  //   BPlusTree bpt("test.db");
-  //   srand(time(0));
-  //   int n = 8;
-  //   for (int i = 1; i <= n; ++i) {
-  //     char k[32];
-  //     snprintf(k, 32, "%d", rand() % n + 1);
-  //     bpt.Put(k, k);
-  //   }
-  //   for (int i = 1; i <= n; ++i) {
-  //     char k[32];
-  //     snprintf(k, 32, "%d", rand() % n + 1);
-  //     bpt.Delete(k);
-  //   }
-  //   remove("test.db");
-  // }
-
-  // for (int i = 0; i < 100; ++i) {
-  //   char k[32];
-  //   char v[32];
-  //   snprintf(k, 32, "k%d", i);
-  //   snprintf(v, 32, "v%d", i);
-  //   bpt.Put(k, v);
-
-  //   std::string test;
-  //   assert(bpt.Get(k, test));
-  //   assert(test == v);
-  // }
-
-  // for (int i = 0; i < 100; ++i) {
-  //   char k[32];
-  //   snprintf(k, 32, "k%d", i);
-  //   bpt.Delete(k);
-  // }
-
+    // Random Delete
+    for (int i = 0; i < n; ++i) {
+      int r = rand() % n;
+      snprintf(k, 33, "k%d", i);
+      bpt.Delete(k);
+    }
+    auto t4 = std::chrono::steady_clock::now();
+    std::cout << "Random Delete " << n << " items: time span="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3)
+                     .count() << "ms"
+              << "\n";
+  }
   return 0;
 }

@@ -3,10 +3,20 @@
 
 #include <cstdio>
 #include <string>
+
+#define DEBUG
+
+#ifdef DEBUG
 #define log(fmt, ...)                                               \
   do {                                                              \
     fprintf(stderr, "%s:%d:" fmt, __FILE__, __LINE__, __VA_ARGS__); \
   } while (0)
+
+#define log2(fmt, ...)                 \
+  do {                                 \
+    fprintf(stderr, fmt, __VA_ARGS__); \
+  } while (0)
+#endif
 
 class BPlusTree {
   struct Meta;
@@ -27,6 +37,9 @@ class BPlusTree {
                                     const std::string& right) const;
   bool Empty() const;
   size_t Size() const;
+#ifdef DEBUG
+  void Dump();
+#endif
 
  private:
   void Exit(const char* msg) const;
@@ -52,24 +65,24 @@ class BPlusTree {
   IndexNode* SplitIndexNode(IndexNode* index_node);
   size_t InsertKeyIntoIndexNode(IndexNode* index_node, const char* key,
                                 Node* left_node, Node* right_node);
-  size_t InsertKeyIntoLeafNode(LeafNode* leaf_node, const char* key,
-                               const char* value);
+  size_t InsertKVIntoLeafNode(LeafNode* leaf_node, const char* key,
+                              const char* value);
   int GetIndexFromLeafNode(LeafNode* leaf_node, const char* key) const;
   IndexNode* GetOrCreateParent(Node* node);
 
-  bool BorrowKeyFromLeftSibling(LeafNode* leaf_node);
-  bool BorrowKeyFromRightSibling(LeafNode* leaf_node);
-  bool BorrowKeyFromSibling(LeafNode* leaf_node);
-  bool MergeLeftLeafNode(LeafNode* leaf_node);
-  bool MergeRightLeafNode(LeafNode* leaf_node);
-  LeafNode* MergeLeafNode(LeafNode* leaf_node);
+  bool BorrowFromLeftLeafSibling(LeafNode* leaf_node);
+  bool BorrowFromRightLeafSibling(LeafNode* leaf_node);
+  bool BorrowFromLeafSibling(LeafNode* leaf_node);
+  bool MergeLeftLeaf(LeafNode* leaf_node);
+  bool MergeRightLeaf(LeafNode* leaf_node);
+  LeafNode* MergeLeaf(LeafNode* leaf_node);
 
-  bool SwapKeyBetweenParentAndLeftSibling(IndexNode* index_node);
-  bool SwapKeyBetweenParentAndRightSibling(IndexNode* index_node);
-  bool SwapKeyBetweenParentAndSibling(IndexNode* index_node);
-  bool MergeLeftIndexNode(IndexNode* index_node);
-  bool MergeRightIndexNode(IndexNode* index_node);
-  IndexNode* MergeIndexNode(IndexNode* index_node);
+  bool BorrowFromLeftIndexSibling(IndexNode* index_node);
+  bool BorrowFromRightIndexSibling(IndexNode* index_node);
+  bool BorrowFromIndexSibling(IndexNode* index_node);
+  bool MergeLeftIndex(IndexNode* index_node);
+  bool MergeRightIndex(IndexNode* index_node);
+  IndexNode* MergeIndex(IndexNode* index_node);
 
   int fd_;
   Meta* meta_;
