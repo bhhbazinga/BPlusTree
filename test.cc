@@ -11,9 +11,10 @@ int main(int argc, char const* argv[]) {
   BPlusTree bpt("test.db");
   char k[33];
   char v[101];
-  for (int n = 1000; n <= 1000000; n *= 10) {
-    std::cout << "----------------------------------------------------" <<
-    "\n"; auto t1 = std::chrono::steady_clock::now();
+  for (int n = 10000; n <= 1000000; n *= 10) {
+    std::cout << "----------------------------------------------------"
+              << "\n";
+    auto t1 = std::chrono::steady_clock::now();
     // Random Insert
     for (int i = 0; i < n; ++i) {
       int r = rand() % n;
@@ -23,9 +24,9 @@ int main(int argc, char const* argv[]) {
     }
     auto t2 = std::chrono::steady_clock::now();
     std::cout << "Random Insert " << n << " items: time span="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t2 -
-              t1)
-                     .count() << "ms"
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1)
+                     .count()
+              << "ms"
               << "\n";
 
     // Random Find
@@ -37,9 +38,9 @@ int main(int argc, char const* argv[]) {
     }
     auto t3 = std::chrono::steady_clock::now();
     std::cout << "Random Get " << n << " items: time span="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t3 -
-              t2)
-                     .count() << "ms"
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2)
+                     .count()
+              << "ms"
               << "\n";
 
     // Random Delete
@@ -50,9 +51,9 @@ int main(int argc, char const* argv[]) {
     }
     auto t4 = std::chrono::steady_clock::now();
     std::cout << "Random Delete " << n << " items: time span="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t4 -
-              t3)
-                     .count() << "ms"
+              << std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3)
+                     .count()
+              << "ms"
               << "\n";
   }
   return 0;

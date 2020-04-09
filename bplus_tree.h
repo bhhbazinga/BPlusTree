@@ -3,8 +3,9 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
-#define DEBUG 
+#define DEBUG
 
 #ifdef DEBUG
 #define LOG(fmt, ...)                                               \
@@ -34,10 +35,11 @@ class BPlusTree {
   void Put(const std::string& key, const std::string& value);
   bool Delete(const std::string& key);
   bool Get(const std::string& key, std::string& value) const;
-  std::vector<std::string> GetRange(const std::string& left,
-                                    const std::string& right) const;
+  std::vector<std::pair<std::string, std::string>> GetRange(
+      const std::string& left_key, const std::string& right_key) const;
   bool Empty() const;
   size_t Size() const;
+
 #ifdef DEBUG
   void Dump();
 #endif

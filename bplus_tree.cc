@@ -250,7 +250,6 @@ class BPlusTree::BlockCache {
     node->next->prev = node->prev;
     node->next = node->prev = nullptr;
     size_ -= node->size;
-    // LOG("DeleteNode->block=%p, node->offset=%d\n", node->block, node->offset);
   }
 
   void InsertHead(Node* node) {
@@ -259,14 +258,11 @@ class BPlusTree::BlockCache {
     head_->next->prev = node;
     head_->next = node;
     size_ += node->size;
-    // LOG("InsertHead:node->block=%p, node->offset=%d\n", node->block,
-    //     node->offset);
   }
 
   Node* DeleteTail() {
     Node* tail = head_->prev;
     if (tail == head_) return nullptr;
-    // LOG("%s", "22222222\n");
     DeleteNode(tail);
     return tail;
   }
@@ -300,9 +296,6 @@ class BPlusTree::BlockCache {
       off_t page_offset = offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
       void* addr = mmap(nullptr, size + offset - page_offset,
                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, page_offset);
-      // LOG("mmap:size=%d,offset=%d,addr=%p\n", size + offset - page_offset,
-      // page_offset, addr);
-
       if (MAP_FAILED == addr) Exit("mmap");
       char* start = static_cast<char*>(addr);
       return reinterpret_cast<T*>(&start[offset - page_offset]);
@@ -310,7 +303,6 @@ class BPlusTree::BlockCache {
 
     Node* node = offset2node_[offset];
     ++node->ref;
-    // LOG("%s", "1111111111\n");
     DeleteNode(node);
     return static_cast<T*>(node->block);
   }
@@ -325,8 +317,6 @@ class BPlusTree::BlockCache {
     off_t page_offset = tail->offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
     char* start = reinterpret_cast<char*>(tail->block);
     void* addr = static_cast<void*>(&start[page_offset - tail->offset]);
-    // LOG("munmap:size=%d,offset=%d,addr=%p\n",
-    //     tail->size + tail->offset - page_offset, page_offset, addr);
     if (munmap(addr, tail->size + tail->offset - page_offset) != 0) {
       Exit("munmap");
     }
@@ -441,6 +431,7 @@ bool BPlusTree::Delete(const std::string& key) {
   }
 
   leaf_node->DeleteKVAtIndex(index);
+  --meta_->size;
   // 2. If leaf_node is root then return.
   if (leaf_node->parent == 0) {
     UnMap(leaf_node);
@@ -501,7 +492,7 @@ bool BPlusTree::Get(const std::string& key, std::string& value) const {
     UnMap<LeafNode>(leaf_node);
     return false;
   }
-  value = leaf_node->records[index].value;
+  value = leaf_node->Value(index);
   UnMap<LeafNode>(leaf_node);
   return true;
 }
@@ -620,6 +611,7 @@ size_t BPlusTree::InsertKVIntoLeafNode(LeafNode* leaf_node, const char* key,
   }
 
   leaf_node->InsertKVAtIndex(index, key, value);
+  ++meta_->size;
   return leaf_node->count;
 }
 
@@ -696,18 +688,39 @@ inline int BPlusTree::GetIndexFromLeafNode(LeafNode* leaf_node,
              : -1;
 }
 
-// std::vector<std::string> BPlusTree::GetRange(const std::string& left_key,
-//                                              const std::string& right_key) {
-//   off_t of_leaf = GetLeafOffset(left_key);
-//   off_t of_leaf = GetLeafOffset(left_key);
-//   std::vector<std::string> res;
-//   res.push_back("aaa");
-//   return res;
-// }
+std::vector<std::pair<std::string, std::string>> BPlusTree::GetRange(
+    const std::string& left_key, const std::string& right_key) const {
+  std::vector<std::pair<std::string, std::string>> res;
+  off_t of_leaf = GetLeafOffset(left_key.data());
+  LeafNode* leaf_node = Map<LeafNode>(of_leaf);
+  int index = LowerBound(leaf_node->records, leaf_node->count, left_key.data());
+  for (int i = index; i < leaf_node->count; ++i) {
+    res.emplace_back(leaf_node->Key(i), leaf_node->Value(i));
+  }
 
-inline bool BPlusTree::Empty() const { return Size() == 0; }
+  of_leaf = leaf_node->right;
+  bool finish = false;
+  while (of_leaf != 0 && !finish) {
+    LeafNode* right_leaf_node = Map<LeafNode>(of_leaf);
+    for (int i = 0; i < right_leaf_node->count; ++i) {
+      if (strncmp(right_leaf_node->Key(i), right_key.data(), kMaxKeySize) <= 0) {
+        res.emplace_back(right_leaf_node->Key(i), right_leaf_node->Value(i));
+      } else {
+        finish = true;
+        break;
+      }
+    }
+    of_leaf = right_leaf_node->right;
+    UnMap(right_leaf_node);
+  }
 
-inline size_t BPlusTree::Size() const { return meta_->size; }
+  UnMap(leaf_node);
+  return res;
+}
+
+bool BPlusTree::Empty() const { return meta_->size == 0; }
+
+size_t BPlusTree::Size() const { return meta_->size; }
 
 // Try Borrow key from left sibling.
 bool BPlusTree::BorrowFromLeftLeafSibling(LeafNode* leaf_node) {
