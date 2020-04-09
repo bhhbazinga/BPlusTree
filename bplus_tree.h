@@ -4,15 +4,15 @@
 #include <cstdio>
 #include <string>
 
-#define DEBUG
+#define DEBUG 
 
 #ifdef DEBUG
-#define log(fmt, ...)                                               \
+#define LOG(fmt, ...)                                               \
   do {                                                              \
     fprintf(stderr, "%s:%d:" fmt, __FILE__, __LINE__, __VA_ARGS__); \
   } while (0)
 
-#define log2(fmt, ...)                 \
+#define LOG2(fmt, ...)                 \
   do {                                 \
     fprintf(stderr, fmt, __VA_ARGS__); \
   } while (0)
@@ -25,6 +25,7 @@ class BPlusTree {
   struct Node;
   struct IndexNode;
   struct LeafNode;
+  class BlockCache;
 
  public:
   BPlusTree(const char* path);
@@ -42,7 +43,6 @@ class BPlusTree {
 #endif
 
  private:
-  void Exit(const char* msg) const;
   template <typename T>
   T* Map(off_t offset) const;
   template <typename T>
@@ -85,6 +85,7 @@ class BPlusTree {
   IndexNode* MergeIndex(IndexNode* index_node);
 
   int fd_;
+  BlockCache* block_cache_;
   Meta* meta_;
 };
 

@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <unordered_map>
 
 const off_t kMetaOffset = 0;
 const int kOrder = 128;
@@ -15,8 +16,14 @@ static_assert(kOrder >= 3,
               "The order of B+Tree should be greater than or equal to 3.");
 const int kMaxKeySize = 32;
 const int kMaxValueSize = 256;
+const int kMaxCacheSize = 1024 * 1024 * 50;
 typedef char Key[kMaxKeySize];
 typedef char Value[kMaxValueSize];
+
+void Exit(const char* msg) {
+  perror(msg);
+  exit(EXIT_FAILURE);
+}
 
 struct BPlusTree::Meta {
   off_t offset;   // ofset of self
@@ -226,11 +233,140 @@ struct BPlusTree::LeafNode : BPlusTree::Node {
   BPlusTree::Record records[kOrder];
 };
 
-BPlusTree::BPlusTree(const char* path)
-    : fd_(open(path, O_CREAT | O_RDWR, 0600)) {
-  if (fd_ == -1) {
-    Exit("open");
+class BPlusTree::BlockCache {
+  struct Node;
+
+ public:
+  BlockCache() : head_(new Node()), size_(0) {
+    head_->next = head_;
+    head_->prev = head_;
   }
+
+  ~BlockCache() {}
+
+  void DeleteNode(Node* node) {
+    if (node->next == node->prev && nullptr == node->next) return;
+    node->prev->next = node->next;
+    node->next->prev = node->prev;
+    node->next = node->prev = nullptr;
+    size_ -= node->size;
+    // LOG("DeleteNode->block=%p, node->offset=%d\n", node->block, node->offset);
+  }
+
+  void InsertHead(Node* node) {
+    node->next = head_->next;
+    node->prev = head_;
+    head_->next->prev = node;
+    head_->next = node;
+    size_ += node->size;
+    // LOG("InsertHead:node->block=%p, node->offset=%d\n", node->block,
+    //     node->offset);
+  }
+
+  Node* DeleteTail() {
+    Node* tail = head_->prev;
+    if (tail == head_) return nullptr;
+    // LOG("%s", "22222222\n");
+    DeleteNode(tail);
+    return tail;
+  }
+
+  template <typename T>
+  void Put(T* block) {
+    if (size_ > kMaxCacheSize) Kick();
+    assert(size_ < kMaxCacheSize);
+
+    if (offset2node_.find(block->offset) == offset2node_.end()) {
+      Node* node = new Node(block, block->offset, sizeof(T));
+      offset2node_.emplace(block->offset, node);
+      InsertHead(node);
+    } else {
+      Node* node = offset2node_[block->offset];
+      if (--node->ref == 0) InsertHead(node);
+    }
+  }
+
+  template <typename T>
+  T* Get(int fd, off_t offset) {
+    if (offset2node_.find(offset) == offset2node_.end()) {
+      struct stat st;
+      if (fstat(fd, &st) != 0) Exit("fstat");
+      constexpr int size = sizeof(T);
+      if (st.st_size < offset + size && ftruncate(fd, offset + size) != 0) {
+        Exit("ftruncate");
+      }
+      // Align offset to page size.
+      // See http://man7.org/linux/man-pages/man2/mmap.2.html
+      off_t page_offset = offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+      void* addr = mmap(nullptr, size + offset - page_offset,
+                        PROT_READ | PROT_WRITE, MAP_SHARED, fd, page_offset);
+      // LOG("mmap:size=%d,offset=%d,addr=%p\n", size + offset - page_offset,
+      // page_offset, addr);
+
+      if (MAP_FAILED == addr) Exit("mmap");
+      char* start = static_cast<char*>(addr);
+      return reinterpret_cast<T*>(&start[offset - page_offset]);
+    }
+
+    Node* node = offset2node_[offset];
+    ++node->ref;
+    // LOG("%s", "1111111111\n");
+    DeleteNode(node);
+    return static_cast<T*>(node->block);
+  }
+
+ private:
+  void Kick() {
+    Node* tail = DeleteTail();
+    if (nullptr == tail) return;
+
+    assert(tail != head_);
+
+    off_t page_offset = tail->offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+    char* start = reinterpret_cast<char*>(tail->block);
+    void* addr = static_cast<void*>(&start[page_offset - tail->offset]);
+    // LOG("munmap:size=%d,offset=%d,addr=%p\n",
+    //     tail->size + tail->offset - page_offset, page_offset, addr);
+    if (munmap(addr, tail->size + tail->offset - page_offset) != 0) {
+      Exit("munmap");
+    }
+    offset2node_.erase(tail->offset);
+    delete tail;
+  }
+
+  struct Node {
+    Node()
+        : block(nullptr),
+          offset(0),
+          size(0),
+          ref(0),
+          prev(nullptr),
+          next(nullptr) {}
+
+    Node(void* block_, off_t offset_, size_t size_)
+        : block(block_),
+          offset(offset_),
+          size(size_),
+          ref(1),
+          prev(nullptr),
+          next(nullptr) {}
+
+    void* block;
+    off_t offset;
+    size_t size;
+    size_t ref;
+    Node* prev;
+    Node* next;
+  };
+
+  Node* head_;
+  size_t size_;
+  std::unordered_map<off_t, Node*> offset2node_;
+};
+
+BPlusTree::BPlusTree(const char* path)
+    : fd_(open(path, O_CREAT | O_RDWR, 0600)), block_cache_(new BlockCache()) {
+  if (fd_ == -1) Exit("open");
   meta_ = Map<Meta>(kMetaOffset);
   if (meta_->height == 0) {
     // Initialize B+tree;
@@ -372,33 +508,12 @@ bool BPlusTree::Get(const std::string& key, std::string& value) const {
 
 template <typename T>
 T* BPlusTree::Map(off_t offset) const {
-  struct stat st;
-  if (fstat(fd_, &st) != 0) Exit("fstat");
-  constexpr int size = sizeof(T);
-  if (st.st_size < offset + size && ftruncate(fd_, offset + size) != 0) {
-    Exit("ftruncate");
-  }
-  // Align offset to page size.
-  // See http://man7.org/linux/man-pages/man2/mmap.2.html
-  off_t page_offset = offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
-  void* addr = mmap(nullptr, size + offset - page_offset,
-                    PROT_READ | PROT_WRITE, MAP_SHARED, fd_, page_offset);
-  if (MAP_FAILED == addr) Exit("mmap");
-  char* start = static_cast<char*>(addr);
-  return reinterpret_cast<T*>(&start[offset - page_offset]);
+  return block_cache_->Get<T>(fd_, offset);
 }
 
 template <typename T>
 void BPlusTree::UnMap(T* map_obj) const {
-  off_t page_offset = map_obj->offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
-  char* start = reinterpret_cast<char*>(map_obj);
-  void* addr = static_cast<void*>(&start[page_offset - map_obj->offset]);
-  if (munmap(addr, sizeof(T)) != 0) Exit("munmap");
-}
-
-void BPlusTree::Exit(const char* msg) const {
-  perror(msg);
-  exit(EXIT_FAILURE);
+  block_cache_->Put<T>(map_obj);
 }
 
 constexpr size_t BPlusTree::GetMinKeys() const { return (kOrder + 1) / 2 - 1; }
@@ -928,15 +1043,15 @@ void BPlusTree::Dump() {
 
   for (int i = 1; i <= meta_->height; ++i) {
     for (int j = 0; j < meta_->height - i; ++j) {
-      log2("%s", "\t");
+      LOG2("%s", "\t");
     }
     for (auto& v : res[i]) {
       for (auto& k : v) {
-        log2("%s,", k.data());
+        LOG2("%s,", k.data());
       }
-      log2("%s", "  ");
+      LOG2("%s", "  ");
     }
-    log2("%s", "\n");
+    LOG2("%s", "\n");
   }
 }
 #endif
