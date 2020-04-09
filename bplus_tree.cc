@@ -16,7 +16,7 @@ static_assert(kOrder >= 3,
               "The order of B+Tree should be greater than or equal to 3.");
 const int kMaxKeySize = 32;
 const int kMaxValueSize = 256;
-const int kMaxCacheSize = 1024 * 1024 * 50;
+const int kMaxCacheSize = 1024 *  1024 * 5;
 typedef char Key[kMaxKeySize];
 typedef char Value[kMaxValueSize];
 
@@ -277,8 +277,7 @@ class BPlusTree::BlockCache {
 
   template <typename T>
   void Put(T* block) {
-    if (size_ > kMaxCacheSize) Kick();
-    assert(size_ < kMaxCacheSize);
+    while (size_ > kMaxCacheSize) Kick();
 
     if (offset2node_.find(block->offset) == offset2node_.end()) {
       Node* node = new Node(block, block->offset, sizeof(T));

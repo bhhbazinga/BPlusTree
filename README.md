@@ -13,7 +13,7 @@ In theory, if the size of the index node in B+ tree is close to the size of the 
   1000K         | 10333ms     | 4726ms     | 8154ms     |
   
 The above data was tested on my 2013 macbook-pro with Intel Core i7 4 cores 2.3 GHz.\
-Each record has a value length of 100 bytes and I set cache size to 50MB.
+Each record has a value length of 100 bytes and I set cache size to 5MB.
 See also [test](test.cc).
 ## Build
 ```
