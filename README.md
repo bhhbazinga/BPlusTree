@@ -32,6 +32,6 @@ size_t Size() const;
 ## TODO List
 - [ ] Support for variable key-value length.
 ## Reference
-[1] [B+ tree-Wikipedia](https://en.wikipedia.org/wiki/B%2B_tree) \
-[2] (https://www.cnblogs.com/nullzx/p/8729425.html) \
-[3] (http://man7.org/linux/man-pages/man2/mmap.2.html)
+[1] https://en.wikipedia.org/wiki/B%2B_tree \
+[2] https://www.cnblogs.com/nullzx/p/8729425.html \
+[3] http://man7.org/linux/man-pages/man2/mmap.2.html
