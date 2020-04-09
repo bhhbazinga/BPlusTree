@@ -33,6 +33,8 @@ size_t Size() const;
 - [ ] Support for variable key-value length.
 - [ ] When Deallc is executed,  put block into reuse-pool.
 - [ ] Defragment db file.
+- [ ] Add WAL(Write Ahead Log).
+- [ ] Data compression.
 ## Reference
 [1] https://en.wikipedia.org/wiki/B%2B_tree \
 [2] https://www.cnblogs.com/nullzx/p/8729425.html \
