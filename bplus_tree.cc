@@ -242,7 +242,11 @@ class BPlusTree::BlockCache {
     head_->prev = head_;
   }
 
-  ~BlockCache() {}
+  ~BlockCache() {
+    while (size_ > 0) Kick();
+    assert(head_->next == head_);
+    assert(head_->prev == head_);
+  }
 
   void DeleteNode(Node* node) {
     if (node->next == node->prev && nullptr == node->next) return;
@@ -261,8 +265,12 @@ class BPlusTree::BlockCache {
   }
 
   Node* DeleteTail() {
+    if (size_ == 0) {
+      assert(head_->next == head_);
+      assert(head_->prev == head_);
+      return nullptr;
+    }
     Node* tail = head_->prev;
-    if (tail == head_) return nullptr;
     DeleteNode(tail);
     return tail;
   }
@@ -372,6 +380,7 @@ BPlusTree::BPlusTree(const char* path)
 
 BPlusTree::~BPlusTree() {
   UnMap(meta_);
+  delete block_cache_;
   close(fd_);
 }
 
@@ -703,7 +712,8 @@ std::vector<std::pair<std::string, std::string>> BPlusTree::GetRange(
   while (of_leaf != 0 && !finish) {
     LeafNode* right_leaf_node = Map<LeafNode>(of_leaf);
     for (int i = 0; i < right_leaf_node->count; ++i) {
-      if (strncmp(right_leaf_node->Key(i), right_key.data(), kMaxKeySize) <= 0) {
+      if (strncmp(right_leaf_node->Key(i), right_key.data(), kMaxKeySize) <=
+          0) {
         res.emplace_back(right_leaf_node->Key(i), right_leaf_node->Value(i));
       } else {
         finish = true;
