@@ -5,7 +5,6 @@ In theory, if the size of the index node in B+ tree is close to the size of the 
 ## Feature
   * Use mmap to read and write to disk.
   * Use LRU to cache mapped blocks.
-  * Support for variable key-value length.
 ## Benchmark
   Magnitude     | Put         | Get        | Delete     |
   :-----------  | :-----------| :----------|:-----------|
@@ -31,7 +30,6 @@ bool Empty() const;
 size_t Size() const;
 ```
 ## TODO List
-+ [ ] Use LRU to cache mapped blocks.
 - [ ] Support for variable key-value length.
 ## Reference
 [1] [B+ tree-Wikipedia](https://en.wikipedia.org/wiki/B%2B_tree)\
