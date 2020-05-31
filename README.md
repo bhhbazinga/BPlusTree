@@ -31,7 +31,7 @@ size_t Size() const;
 ```
 ## TODO List
 - [ ] Support for variable key-value length.
-- [ ] When Deallc is executed,  put block into reuse-pool.
+- [ ] When Dealloc is executed, put block into reuse-pool.
 - [ ] Defragment db file.
 - [ ] Add WAL(Write Ahead Log).
 - [ ] Data compression.
