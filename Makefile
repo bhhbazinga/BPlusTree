@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Werror=return-type -pedantic -std=c++2a -g -o0 -fsanitize=address
+CXXFLAGS = -Wall -Wextra -Werror=return-type -pedantic -std=c++2a -g -o2 -fsanitize=leak
 EXEC = test
 all: $(EXEC)
 

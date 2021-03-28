@@ -243,9 +243,17 @@ class BPlusTree::BlockCache {
   }
 
   ~BlockCache() {
-    while (size_ > 0) Kick();
-    assert(head_->next == head_);
-    assert(head_->prev == head_);
+    for (auto it = offset2node_.begin(); it != offset2node_.end(); it++) {
+      Node* node = it->second;
+      off_t page_offset = node->offset & ~(sysconf(_SC_PAGE_SIZE) - 1);
+      char* start = reinterpret_cast<char*>(node->block);
+      void* addr = static_cast<void*>(&start[page_offset - node->offset]);
+      if (munmap(addr, node->size + node->offset - page_offset) != 0) {
+        Exit("munmap");
+      }
+      delete node;
+    }
+    delete head_;
   }
 
   void DeleteNode(Node* node) {
